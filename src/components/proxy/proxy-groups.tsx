@@ -208,7 +208,7 @@ export const ProxyGroups = (props: Props) => {
         overscan={150}
         defaultItemHeight={56}
         scrollerRef={(ref) => {
-          scrollerRef.current = ref;
+          scrollerRef.current = ref as HTMLElement;
         }}
         components={{
           Footer: () => <div style={{ height: "16px" }} />,
