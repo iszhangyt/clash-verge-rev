@@ -25,7 +25,7 @@
     "devUrl": "http://localhost:3000/"
   },
   "productName": "Clash Verge",
-  "version": "2.0.4-alpha",
+  "version": "2.0.4-8e8dd1e",
   "identifier": "io.github.clash-verge-rev.clash-verge-rev",
   "plugins": {
     "deep-link": {
@@ -36,13 +36,8 @@
     "updater": {
       "active": true,
       "dialog": true,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQyOEMyRjBCQkVGOUJEREYKUldUZnZmbStDeStNMHU5Mmo1N24xQXZwSVRYbXA2NUpzZE5oVzlqeS9Bc0t6RVV4MmtwVjBZaHgK",
-      "endpoints": [
-        "https://download.clashverge.dev/https://github.com/clash-verge-rev/clash-verge-rev/releases/download/updater/update-proxy.json",
-        "https://github.com/clash-verge-rev/clash-verge-rev/releases/download/updater/update.json",
-        "https://download.clashverge.dev/https://github.com/clash-verge-rev/clash-verge-rev/releases/download/alpha/update-alpha-proxy.json",
-        "https://github.com/clash-verge-rev/clash-verge-rev/releases/download/alpha/update-alpha.json"
-      ]
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEzNTUzNzJCRTU1MkY2NzcKUldSMzlsTGxLemRWbzdmakNFYnJIVjhWY2JLVUozeGFaZS8yKzVJNHFLQ2JoR0dWb2krSFhaSzcK",
+      "endpoints": []
     }
   },
   "app": {
