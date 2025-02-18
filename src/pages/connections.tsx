@@ -1,9 +1,14 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useCallback } from "react";
 import { useLockFn } from "ahooks";
 import { Box, Button, IconButton, MenuItem } from "@mui/material";
 import { Virtuoso } from "react-virtuoso";
 import { useTranslation } from "react-i18next";
-import { TableChartRounded, TableRowsRounded } from "@mui/icons-material";
+import {
+  TableChartRounded,
+  TableRowsRounded,
+  PlayCircleOutlineRounded,
+  PauseCircleOutlineRounded,
+} from "@mui/icons-material";
 import { closeAllConnections } from "@/services/api";
 import { useConnectionSetting } from "@/services/states";
 import { useClashInfo } from "@/hooks/use-clash";
@@ -15,7 +20,10 @@ import {
   ConnectionDetailRef,
 } from "@/components/connection/connection-detail";
 import parseTraffic from "@/utils/parse-traffic";
-import { BaseSearchBox } from "@/components/base/base-search-box";
+import {
+  BaseSearchBox,
+  type SearchState,
+} from "@/components/base/base-search-box";
 import { BaseStyledSelect } from "@/components/base/base-styled-select";
 import useSWRSubscription from "swr/subscription";
 import { createSockette } from "@/utils/websocket";
@@ -55,6 +63,9 @@ const ConnectionsPage = () => {
       list.sort((a, b) => b.curDownload! - a.curDownload!),
   };
 
+  const [isPaused, setIsPaused] = useState(false);
+  const [frozenData, setFrozenData] = useState<IConnections | null>(null);
+
   const { data: connData = initConn } = useSWRSubscription<
     IConnections,
     any,
@@ -67,9 +78,7 @@ const ConnectionsPage = () => {
         `ws://${server}/connections?token=${encodeURIComponent(secret)}`,
         {
           onmessage(event) {
-            // meta v1.15.0 出现 data.connections 为 null 的情况
             const data = JSON.parse(event.data) as IConnections;
-            // 尽量与前一次 connections 的展示顺序保持一致
             next(null, (old = initConn) => {
               const oldConn = old.connections;
               const maxLen = data.connections?.length;
@@ -114,11 +123,19 @@ const ConnectionsPage = () => {
     },
   );
 
+  const displayData = useMemo(() => {
+    return isPaused ? (frozenData ?? connData) : connData;
+  }, [isPaused, frozenData, connData]);
+
   const [filterConn, download, upload] = useMemo(() => {
     const orderFunc = orderOpts[curOrderOpt];
-    let connections = connData.connections.filter((conn) =>
-      match(conn.metadata.host || conn.metadata.destinationIP || ""),
-    );
+
+    let connections = displayData.connections.filter((conn) => {
+      const { host, destinationIP, process } = conn.metadata;
+      return (
+        match(host || "") || match(destinationIP || "") || match(process || "")
+      );
+    });
 
     if (orderFunc) connections = orderFunc(connections);
 
@@ -129,11 +146,26 @@ const ConnectionsPage = () => {
       upload += x.upload;
     });
     return [connections, download, upload];
-  }, [connData, match, curOrderOpt]);
+  }, [displayData, match, curOrderOpt]);
 
   const onCloseAll = useLockFn(closeAllConnections);
 
   const detailRef = useRef<ConnectionDetailRef>(null!);
+
+  const handleSearch = useCallback((match: (content: string) => boolean) => {
+    setMatch(() => match);
+  }, []);
+
+  const handlePauseToggle = useCallback(() => {
+    setIsPaused((prev) => {
+      if (!prev) {
+        setFrozenData(connData);
+      } else {
+        setFrozenData(null);
+      }
+      return !prev;
+    });
+  }, [connData]);
 
   return (
     <BasePage
@@ -144,8 +176,6 @@ const ConnectionsPage = () => {
         display: "flex",
         flexDirection: "column",
         overflow: "auto",
-        //    margin: "0 10px",
-        //  backgroundColor: isDark ? "#282a36" : "#ffffff",
         borderRadius: "8px",
       }}
       header={
@@ -168,16 +198,23 @@ const ConnectionsPage = () => {
             }
           >
             {isTableLayout ? (
-              <span title={t("List View")}>
-                <TableRowsRounded fontSize="inherit" />
-              </span>
+              <TableRowsRounded titleAccess={t("List View")} />
             ) : (
-              <span title={t("Table View")}>
-                <TableChartRounded fontSize="inherit" />
-              </span>
+              <TableChartRounded titleAccess={t("Table View")} />
             )}
           </IconButton>
-
+          <IconButton
+            color="inherit"
+            size="small"
+            onClick={handlePauseToggle}
+            title={isPaused ? t("Resume") : t("Pause")}
+          >
+            {isPaused ? (
+              <PlayCircleOutlineRounded />
+            ) : (
+              <PauseCircleOutlineRounded />
+            )}
+          </IconButton>
           <Button size="small" variant="contained" onClick={onCloseAll}>
             <span style={{ whiteSpace: "nowrap" }}>{t("Close All")}</span>
           </Button>
@@ -193,7 +230,6 @@ const ConnectionsPage = () => {
           display: "flex",
           alignItems: "center",
           userSelect: "text",
-          //     backgroundColor: isDark ? "#282a36" : "#ffffff",
           position: "sticky",
           top: 0,
           zIndex: 2,
@@ -211,7 +247,7 @@ const ConnectionsPage = () => {
             ))}
           </BaseStyledSelect>
         )}
-        <BaseSearchBox onSearch={(match) => setMatch(() => match)} />
+        <BaseSearchBox onSearch={handleSearch} />
       </Box>
 
       {filterConn.length === 0 ? (
@@ -225,7 +261,6 @@ const ConnectionsPage = () => {
         <Virtuoso
           style={{
             flex: 1,
-            //    backgroundColor: isDark ? "#282a36" : "#ffffff",
             borderRadius: "8px",
           }}
           data={filterConn}

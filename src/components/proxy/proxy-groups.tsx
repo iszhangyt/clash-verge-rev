@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback } from "react";
+import { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { useLockFn } from "ahooks";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import {
@@ -16,6 +16,173 @@ import { ProxyRender } from "./proxy-render";
 import delayManager from "@/services/delay";
 import { useTranslation } from "react-i18next";
 import { ScrollTopButton } from "../layout/scroll-top-button";
+import { Box, styled } from "@mui/material";
+import { memo } from "react";
+import { createPortal } from "react-dom";
+
+// 将选择器组件抽离出来，避免主组件重渲染时重复创建样式
+const AlphabetSelector = styled(Box)(({ theme }) => ({
+  position: "fixed",
+  right: 4,
+  top: "50%",
+  transform: "translateY(-50%)",
+  display: "flex",
+  flexDirection: "column",
+  background: "transparent",
+  zIndex: 1000,
+  gap: "2px",
+  // padding: "4px 2px",
+  willChange: "transform",
+  "&:hover": {
+    background: theme.palette.background.paper,
+    boxShadow: theme.shadows[2],
+    borderRadius: "8px",
+  },
+  "& .scroll-container": {
+    overflow: "hidden",
+    maxHeight: "inherit",
+  },
+  "& .letter-container": {
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    transition: "transform 0.2s ease",
+  },
+  "& .letter": {
+    padding: "1px 4px",
+    fontSize: "12px",
+    cursor: "pointer",
+    fontFamily:
+      "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+    color: theme.palette.text.secondary,
+    position: "relative",
+    width: "1.5em",
+    height: "1.5em",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    transition: "all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)",
+    transform: "scale(1) translateZ(0)",
+    backfaceVisibility: "hidden",
+    borderRadius: "6px",
+    "&:hover": {
+      color: theme.palette.primary.main,
+      transform: "scale(1.4) translateZ(0)",
+      backgroundColor: theme.palette.action.hover,
+    },
+  },
+}));
+
+// 创建一个单独的 Tooltip 组件
+const Tooltip = styled("div")(({ theme }) => ({
+  position: "fixed",
+  background: theme.palette.background.paper,
+  padding: "4px 8px",
+  borderRadius: "6px",
+  boxShadow: theme.shadows[3],
+  whiteSpace: "nowrap",
+  fontSize: "16px",
+  color: theme.palette.text.primary,
+  pointerEvents: "none",
+  "&::after": {
+    content: '""',
+    position: "absolute",
+    right: "-4px",
+    top: "50%",
+    transform: "translateY(-50%)",
+    width: 0,
+    height: 0,
+    borderTop: "4px solid transparent",
+    borderBottom: "4px solid transparent",
+    borderLeft: `4px solid ${theme.palette.background.paper}`,
+  },
+}));
+
+// 抽离字母选择器子组件
+const LetterItem = memo(
+  ({
+    name,
+    onClick,
+    getFirstChar,
+  }: {
+    name: string;
+    onClick: (name: string) => void;
+    getFirstChar: (str: string) => string;
+  }) => {
+    const [showTooltip, setShowTooltip] = useState(false);
+    const letterRef = useRef<HTMLDivElement>(null);
+    const [tooltipPosition, setTooltipPosition] = useState({
+      top: 0,
+      right: 0,
+    });
+    const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+
+    const updateTooltipPosition = useCallback(() => {
+      if (!letterRef.current) return;
+      const rect = letterRef.current.getBoundingClientRect();
+      setTooltipPosition({
+        top: rect.top + rect.height / 2,
+        right: window.innerWidth - rect.left + 8,
+      });
+    }, []);
+
+    useEffect(() => {
+      if (showTooltip) {
+        updateTooltipPosition();
+      }
+    }, [showTooltip, updateTooltipPosition]);
+
+    const handleMouseEnter = useCallback(() => {
+      setShowTooltip(true);
+      // 添加 200ms 的延迟，避免鼠标快速划过时触发滚动
+      hoverTimeoutRef.current = setTimeout(() => {
+        onClick(name);
+      }, 100);
+    }, [name, onClick]);
+
+    const handleMouseLeave = useCallback(() => {
+      setShowTooltip(false);
+      if (hoverTimeoutRef.current) {
+        clearTimeout(hoverTimeoutRef.current);
+      }
+    }, []);
+
+    useEffect(() => {
+      return () => {
+        if (hoverTimeoutRef.current) {
+          clearTimeout(hoverTimeoutRef.current);
+        }
+      };
+    }, []);
+
+    return (
+      <>
+        <div
+          ref={letterRef}
+          className="letter"
+          onClick={() => onClick(name)}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        >
+          <span>{getFirstChar(name)}</span>
+        </div>
+        {showTooltip &&
+          createPortal(
+            <Tooltip
+              style={{
+                top: tooltipPosition.top,
+                right: tooltipPosition.right,
+                transform: "translateY(-50%)",
+              }}
+            >
+              {name}
+            </Tooltip>,
+            document.body,
+          )}
+      </>
+    );
+  },
+);
 
 interface Props {
   mode: string;
@@ -35,6 +202,37 @@ export const ProxyGroups = (props: Props) => {
   const scrollPositionRef = useRef<Record<string, number>>({});
   const [showScrollTop, setShowScrollTop] = useState(false);
   const scrollerRef = useRef<Element | null>(null);
+  const letterContainerRef = useRef<HTMLDivElement>(null);
+  const alphabetSelectorRef = useRef<HTMLDivElement>(null);
+  const [maxHeight, setMaxHeight] = useState("auto");
+
+  // 使用useMemo缓存字母索引数据
+  const { groupFirstLetters, letterIndexMap } = useMemo(() => {
+    const letters = new Set<string>();
+    const indexMap: Record<string, number> = {};
+
+    renderList.forEach((item, index) => {
+      if (item.type === 0) {
+        const fullName = item.group.name;
+        letters.add(fullName);
+        if (!(fullName in indexMap)) {
+          indexMap[fullName] = index;
+        }
+      }
+    });
+
+    return {
+      groupFirstLetters: Array.from(letters),
+      letterIndexMap: indexMap,
+    };
+  }, [renderList]);
+
+  // 缓存getFirstChar函数
+  const getFirstChar = useCallback((str: string) => {
+    const regex = /\p{Extended_Pictographic}|\p{L}|\p{N}|./u;
+    const match = str.match(regex);
+    return match ? match[0] : str.charAt(0);
+  }, []);
 
   // 从 localStorage 恢复滚动位置
   useEffect(() => {
@@ -77,13 +275,13 @@ export const ProxyGroups = (props: Props) => {
     [mode],
   );
 
-  // 优化滚动处理函数
+  // 优化滚动处理函数，使用防抖
   const handleScroll = useCallback(
-    (e: any) => {
+    debounce((e: any) => {
       const scrollTop = e.target.scrollTop;
       setShowScrollTop(scrollTop > 100);
       saveScrollPosition(scrollTop);
-    },
+    }, 16),
     [saveScrollPosition],
   );
 
@@ -108,6 +306,21 @@ export const ProxyGroups = (props: Props) => {
     });
     saveScrollPosition(0);
   }, [saveScrollPosition]);
+
+  // 处理字母点击，使用useCallback
+  const handleLetterClick = useCallback(
+    (name: string) => {
+      const index = letterIndexMap[name];
+      if (index !== undefined) {
+        virtuosoRef.current?.scrollToIndex({
+          index,
+          align: "start",
+          behavior: "smooth",
+        });
+      }
+    },
+    [letterIndexMap],
+  );
 
   // 切换分组的节点代理
   const handleChangeProxy = useLockFn(
@@ -194,6 +407,64 @@ export const ProxyGroups = (props: Props) => {
     }
   };
 
+  // 添加滚轮事件处理函数
+  const handleWheel = useCallback((e: WheelEvent) => {
+    e.preventDefault();
+    if (!letterContainerRef.current) return;
+
+    const container = letterContainerRef.current;
+    const scrollAmount = e.deltaY;
+    const currentTransform = new WebKitCSSMatrix(container.style.transform);
+    const currentY = currentTransform.m42 || 0;
+
+    const containerHeight = container.getBoundingClientRect().height;
+    const parentHeight =
+      container.parentElement?.getBoundingClientRect().height || 0;
+    const maxScroll = Math.max(0, containerHeight - parentHeight);
+
+    let newY = currentY - scrollAmount;
+    newY = Math.min(0, Math.max(-maxScroll, newY));
+
+    container.style.transform = `translateY(${newY}px)`;
+  }, []);
+
+  // 添加和移除滚轮事件监听
+  useEffect(() => {
+    const container = letterContainerRef.current?.parentElement;
+    if (container) {
+      container.addEventListener("wheel", handleWheel, { passive: false });
+      return () => {
+        container.removeEventListener("wheel", handleWheel);
+      };
+    }
+  }, [handleWheel]);
+
+  // 添加窗口大小变化监听和最大高度计算
+  const updateMaxHeight = useCallback(() => {
+    if (!alphabetSelectorRef.current) return;
+
+    const windowHeight = window.innerHeight;
+    const bottomMargin = 60; // 底部边距
+    const topMargin = bottomMargin * 2; // 顶部边距是底部的2倍
+    const availableHeight = windowHeight - (topMargin + bottomMargin);
+
+    // 调整选择器的位置，使其偏下
+    const offsetPercentage =
+      (((topMargin - bottomMargin) / windowHeight) * 100) / 2;
+    alphabetSelectorRef.current.style.top = `calc(48% + ${offsetPercentage}vh)`;
+
+    setMaxHeight(`${availableHeight}px`);
+  }, []);
+
+  // 监听窗口大小变化
+  useEffect(() => {
+    updateMaxHeight();
+    window.addEventListener("resize", updateMaxHeight);
+    return () => {
+      window.removeEventListener("resize", updateMaxHeight);
+    };
+  }, [updateMaxHeight]);
+
   if (mode === "direct") {
     return <BaseEmpty text={t("clash_mode_direct")} />;
   }
@@ -208,7 +479,7 @@ export const ProxyGroups = (props: Props) => {
         overscan={150}
         defaultItemHeight={56}
         scrollerRef={(ref) => {
-          scrollerRef.current = ref as HTMLElement;
+          scrollerRef.current = ref as Element;
         }}
         components={{
           Footer: () => <div style={{ height: "16px" }} />,
@@ -226,6 +497,33 @@ export const ProxyGroups = (props: Props) => {
         )}
       />
       <ScrollTopButton show={showScrollTop} onClick={scrollToTop} />
+
+      <AlphabetSelector ref={alphabetSelectorRef} style={{ maxHeight }}>
+        <div className="scroll-container">
+          <div ref={letterContainerRef} className="letter-container">
+            {groupFirstLetters.map((name) => (
+              <LetterItem
+                key={name}
+                name={name}
+                onClick={handleLetterClick}
+                getFirstChar={getFirstChar}
+              />
+            ))}
+          </div>
+        </div>
+      </AlphabetSelector>
     </div>
   );
 };
+
+// 简单的防抖函数
+function debounce<T extends (...args: any[]) => any>(
+  func: T,
+  wait: number,
+): (...args: Parameters<T>) => void {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  return (...args: Parameters<T>) => {
+    if (timeout) clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), wait);
+  };
+}
