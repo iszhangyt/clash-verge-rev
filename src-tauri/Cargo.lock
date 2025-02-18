@@ -999,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "clash-verge"
-version = "2.0.4-8e8dd1e"
+version = "2.0.4-5d9dce7"
 dependencies = [
  "aes-gcm",
  "anyhow",
